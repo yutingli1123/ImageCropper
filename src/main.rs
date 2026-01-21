@@ -66,6 +66,63 @@ impl ImageCropper {
         }
     }
 
+    fn apply_aspect_ratio(&mut self) {
+        if let (Some(image), Some(crop_rect)) = (&self.image, &mut self.crop_rect) {
+            let image_size = egui::vec2(image.width() as f32, image.height() as f32);
+            let target_ratio = match self.aspect_ratio_mode {
+                AspectRatioMode::Free => None,
+                AspectRatioMode::Original => Some(image_size.x / image_size.y),
+                AspectRatioMode::Square => Some(1.0),
+                AspectRatioMode::R4_3 => Some(4.0 / 3.0),
+                AspectRatioMode::R16_9 => Some(16.0 / 9.0),
+                AspectRatioMode::Custom => Some(self.custom_w as f32 / self.custom_h as f32),
+            };
+
+            if let Some(ratio) = target_ratio {
+                // Calculate normalized target aspect ratio
+                let norm_aspect = ratio * (image_size.y / image_size.x);
+                let current_center = crop_rect.center();
+
+                // Try to fit the new ratio within the current crop width/height
+                // We want new_w / new_h = norm_aspect
+
+                let mut new_w = crop_rect.width();
+                let mut new_h = new_w / norm_aspect;
+
+                if new_h > crop_rect.height() {
+                    new_h = crop_rect.height();
+                    new_w = new_h * norm_aspect;
+                }
+
+                *crop_rect = egui::Rect::from_center_size(current_center, egui::vec2(new_w, new_h));
+
+                // Ensure it stays within 0.0-1.0 bounds logic if needed,
+                // but simpler to let user adjust if it clips slightly or clamp it.
+                // Let's simple clamp for now to be safe.
+                if crop_rect.min.x < 0.0 {
+                    *crop_rect = crop_rect.translate(egui::vec2(-crop_rect.min.x, 0.0));
+                }
+                if crop_rect.min.y < 0.0 {
+                    *crop_rect = crop_rect.translate(egui::vec2(0.0, -crop_rect.min.y));
+                }
+                if crop_rect.max.x > 1.0 {
+                    *crop_rect = crop_rect.translate(egui::vec2(1.0 - crop_rect.max.x, 0.0));
+                }
+                if crop_rect.max.y > 1.0 {
+                    *crop_rect = crop_rect.translate(egui::vec2(0.0, 1.0 - crop_rect.max.y));
+                }
+
+                // Hard clamp if still out (e.g. too big)
+                crop_rect.min = crop_rect
+                    .min
+                    .clamp(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0));
+                crop_rect.max = crop_rect
+                    .max
+                    .clamp(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0));
+            }
+        }
+    }
+
     fn hit_test(pos: egui::Pos2, rect: egui::Rect) -> Option<ResizeHandle> {
         let tolerance = 10.0;
 
@@ -127,53 +184,74 @@ impl eframe::App for ImageCropper {
             if self.texture.is_some() {
                 ui.horizontal(|ui| {
                     ui.label("Aspect Ratio:");
+                    let mut changed = false;
                     egui::ComboBox::from_id_salt("params_aspect_ratio")
                         .selected_text(format!("{:?}", self.aspect_ratio_mode))
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut self.aspect_ratio_mode,
-                                AspectRatioMode::Free,
-                                "Free",
-                            );
-                            ui.selectable_value(
-                                &mut self.aspect_ratio_mode,
-                                AspectRatioMode::Original,
-                                "Original",
-                            );
-                            ui.selectable_value(
-                                &mut self.aspect_ratio_mode,
-                                AspectRatioMode::Square,
-                                "1:1",
-                            );
-                            ui.selectable_value(
-                                &mut self.aspect_ratio_mode,
-                                AspectRatioMode::R4_3,
-                                "4:3",
-                            );
-                            ui.selectable_value(
-                                &mut self.aspect_ratio_mode,
-                                AspectRatioMode::R16_9,
-                                "16:9",
-                            );
-                            ui.selectable_value(
-                                &mut self.aspect_ratio_mode,
-                                AspectRatioMode::Custom,
-                                "Custom",
-                            );
+                            changed |= ui
+                                .selectable_value(
+                                    &mut self.aspect_ratio_mode,
+                                    AspectRatioMode::Free,
+                                    "Free",
+                                )
+                                .changed();
+                            changed |= ui
+                                .selectable_value(
+                                    &mut self.aspect_ratio_mode,
+                                    AspectRatioMode::Original,
+                                    "Original",
+                                )
+                                .changed();
+                            changed |= ui
+                                .selectable_value(
+                                    &mut self.aspect_ratio_mode,
+                                    AspectRatioMode::Square,
+                                    "1:1",
+                                )
+                                .changed();
+                            changed |= ui
+                                .selectable_value(
+                                    &mut self.aspect_ratio_mode,
+                                    AspectRatioMode::R4_3,
+                                    "4:3",
+                                )
+                                .changed();
+                            changed |= ui
+                                .selectable_value(
+                                    &mut self.aspect_ratio_mode,
+                                    AspectRatioMode::R16_9,
+                                    "16:9",
+                                )
+                                .changed();
+                            changed |= ui
+                                .selectable_value(
+                                    &mut self.aspect_ratio_mode,
+                                    AspectRatioMode::Custom,
+                                    "Custom",
+                                )
+                                .changed();
                         });
 
                     if self.aspect_ratio_mode == AspectRatioMode::Custom {
-                        ui.add(
-                            egui::DragValue::new(&mut self.custom_w)
-                                .speed(0.1)
-                                .range(1..=100),
-                        );
+                        changed |= ui
+                            .add(
+                                egui::DragValue::new(&mut self.custom_w)
+                                    .speed(0.1)
+                                    .range(1..=100),
+                            )
+                            .changed();
                         ui.label(":");
-                        ui.add(
-                            egui::DragValue::new(&mut self.custom_h)
-                                .speed(0.1)
-                                .range(1..=100),
-                        );
+                        changed |= ui
+                            .add(
+                                egui::DragValue::new(&mut self.custom_h)
+                                    .speed(0.1)
+                                    .range(1..=100),
+                            )
+                            .changed();
+                    }
+
+                    if changed {
+                        self.apply_aspect_ratio();
                     }
 
                     if ui.button("Save Cropped Image").clicked() {
