@@ -1,3 +1,463 @@
-fn main() {
-    println!("Hello, world!");
+use eframe::egui;
+use image::DynamicImage;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ResizeHandle {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+    Top,
+    Bottom,
+    Left,
+    Right,
+    Center, // Moving
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum AspectRatioMode {
+    Free,
+    Original,
+    Square,
+    R4_3,
+    R16_9,
+    Custom,
+}
+
+#[derive(Default)]
+struct ImageCropper {
+    image: Option<DynamicImage>,
+    texture: Option<egui::TextureHandle>,
+    crop_rect: Option<egui::Rect>, // Normalized coordinates (0.0-1.0)
+    selected_handle: Option<ResizeHandle>,
+    aspect_ratio_mode: AspectRatioMode,
+    custom_ratio: Option<f32>, // Width / Height
+}
+
+impl Default for AspectRatioMode {
+    fn default() -> Self {
+        Self::Free
+    }
+}
+
+impl ImageCropper {
+    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        Self::default()
+    }
+
+    fn load_texture(&mut self, ctx: &egui::Context) {
+        if let Some(image) = &self.image {
+            let size = [image.width() as _, image.height() as _];
+            let image_buffer = image.to_rgba8();
+            let pixels = image_buffer.as_flat_samples();
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+            self.texture =
+                Some(ctx.load_texture("image", color_image, egui::TextureOptions::LINEAR));
+            // Initialize crop rect to full image
+            self.crop_rect = Some(egui::Rect::from_min_max(
+                egui::Pos2::new(0.0, 0.0),
+                egui::Pos2::new(1.0, 1.0),
+            ));
+        }
+    }
+
+    fn hit_test(pos: egui::Pos2, rect: egui::Rect) -> Option<ResizeHandle> {
+        let tolerance = 10.0;
+
+        let min = rect.min;
+        let max = rect.max;
+
+        if pos.distance(min) < tolerance {
+            return Some(ResizeHandle::TopLeft);
+        }
+        if pos.distance(egui::pos2(max.x, min.y)) < tolerance {
+            return Some(ResizeHandle::TopRight);
+        }
+        if pos.distance(egui::pos2(min.x, max.y)) < tolerance {
+            return Some(ResizeHandle::BottomLeft);
+        }
+        if pos.distance(max) < tolerance {
+            return Some(ResizeHandle::BottomRight);
+        }
+
+        if (pos.x - min.x).abs() < tolerance && pos.y > min.y && pos.y < max.y {
+            return Some(ResizeHandle::Left);
+        }
+        if (pos.x - max.x).abs() < tolerance && pos.y > min.y && pos.y < max.y {
+            return Some(ResizeHandle::Right);
+        }
+        if (pos.y - min.y).abs() < tolerance && pos.x > min.x && pos.x < max.x {
+            return Some(ResizeHandle::Top);
+        }
+        if (pos.y - max.y).abs() < tolerance && pos.x > min.x && pos.x < max.x {
+            return Some(ResizeHandle::Bottom);
+        }
+
+        if rect.contains(pos) {
+            return Some(ResizeHandle::Center);
+        }
+
+        None
+    }
+}
+
+impl eframe::App for ImageCropper {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Image Cropper");
+
+            if ui.button("Open Image").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Image", &["png", "jpg", "jpeg", "bmp"])
+                    .pick_file()
+                {
+                    if let Ok(img) = image::open(&path) {
+                        self.image = Some(img);
+                        self.load_texture(ctx);
+                        self.selected_handle = None;
+                    }
+                }
+            }
+
+            ui.horizontal(|ui| {
+                ui.label("Aspect Ratio:");
+                egui::ComboBox::from_id_salt("params_aspect_ratio")
+                    .selected_text(format!("{:?}", self.aspect_ratio_mode))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.aspect_ratio_mode,
+                            AspectRatioMode::Free,
+                            "Free",
+                        );
+                        ui.selectable_value(
+                            &mut self.aspect_ratio_mode,
+                            AspectRatioMode::Original,
+                            "Original",
+                        );
+                        ui.selectable_value(
+                            &mut self.aspect_ratio_mode,
+                            AspectRatioMode::Square,
+                            "1:1",
+                        );
+                        ui.selectable_value(
+                            &mut self.aspect_ratio_mode,
+                            AspectRatioMode::R4_3,
+                            "4:3",
+                        );
+                        ui.selectable_value(
+                            &mut self.aspect_ratio_mode,
+                            AspectRatioMode::R16_9,
+                            "16:9",
+                        );
+                        ui.selectable_value(
+                            &mut self.aspect_ratio_mode,
+                            AspectRatioMode::Custom,
+                            "Custom",
+                        );
+                    });
+
+                if self.aspect_ratio_mode == AspectRatioMode::Custom {
+                    let mut r = self.custom_ratio.unwrap_or(1.0);
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut r)
+                                .speed(0.1)
+                                .range(0.1..=10.0)
+                                .prefix("Ratio: "),
+                        )
+                        .changed()
+                    {
+                        self.custom_ratio = Some(r);
+                    }
+                }
+
+                if ui.button("Save Cropped Image").clicked() {
+                    if let (Some(image), Some(crop_rect)) = (&self.image, self.crop_rect) {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("Image", &["png", "jpg", "jpeg", "bmp"])
+                            .save_file()
+                        {
+                            let w = image.width() as f32;
+                            let h = image.height() as f32;
+
+                            let x = (crop_rect.min.x * w).max(0.0) as u32;
+                            let y = (crop_rect.min.y * h).max(0.0) as u32;
+                            let width = (crop_rect.width() * w).max(1.0) as u32;
+                            let height = (crop_rect.height() * h).max(1.0) as u32;
+
+                            // Ensure bounds
+                            let x = x.min(image.width() - 1);
+                            let y = y.min(image.height() - 1);
+                            let width = width.min(image.width() - x);
+                            let height = height.min(image.height() - y);
+
+                            let cropped = image.crop_imm(x, y, width, height);
+                            if let Err(e) = cropped.save(path) {
+                                eprintln!("Failed to save image: {}", e);
+                            }
+                        }
+                    }
+                }
+            });
+
+            ui.separator();
+
+            if let (Some(texture), Some(crop_rect)) = (&self.texture, &mut self.crop_rect) {
+                let available_size = ui.available_size();
+                let image_size = texture.size_vec2();
+
+                // Calculate size to fit within available space while maintaining aspect ratio
+                let scale = (available_size.x / image_size.x).min(available_size.y / image_size.y);
+                let display_size = image_size * scale;
+
+                let (response, painter) = ui.allocate_painter(display_size, egui::Sense::drag());
+                let rect = response.rect;
+
+                // Draw image
+                painter.image(
+                    texture.id(),
+                    rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+
+                // Convert normalized crop rect to screen coordinates
+                let mut screen_crop_rect = egui::Rect::from_min_max(
+                    rect.lerp_inside(crop_rect.min.to_vec2()),
+                    rect.lerp_inside(crop_rect.max.to_vec2()),
+                );
+
+                // Handle Input
+                if response.drag_started() {
+                    if let Some(pos) = response.interact_pointer_pos() {
+                        self.selected_handle = Self::hit_test(pos, screen_crop_rect);
+                    }
+                }
+
+                if response.dragged() {
+                    if let Some(handle) = self.selected_handle {
+                        let delta = response.drag_delta();
+                        let delta_norm = delta / display_size; // Normalize delta
+
+                        // Determine target aspect ratio
+                        let target_ratio = match self.aspect_ratio_mode {
+                            AspectRatioMode::Free => None,
+                            AspectRatioMode::Original => Some(image_size.x / image_size.y),
+                            AspectRatioMode::Square => Some(1.0),
+                            AspectRatioMode::R4_3 => Some(4.0 / 3.0),
+                            AspectRatioMode::R16_9 => Some(16.0 / 9.0),
+                            AspectRatioMode::Custom => self.custom_ratio,
+                        };
+
+                        if let Some(ratio) = target_ratio {
+                            // Constrained resize
+                            let norm_aspect = ratio * (image_size.y / image_size.x);
+
+                            match handle {
+                                ResizeHandle::Center => {
+                                    *crop_rect = crop_rect.translate(delta_norm);
+                                }
+                                ResizeHandle::TopLeft => {
+                                    let d = delta_norm.x;
+                                    crop_rect.min.x += d;
+                                    crop_rect.min.y += d / norm_aspect;
+                                }
+                                ResizeHandle::TopRight => {
+                                    let d = delta_norm.x;
+                                    crop_rect.max.x += d;
+                                    crop_rect.min.y -= d / norm_aspect;
+                                }
+                                ResizeHandle::BottomLeft => {
+                                    let d = delta_norm.x;
+                                    crop_rect.min.x += d;
+                                    crop_rect.max.y -= d / norm_aspect;
+                                }
+                                ResizeHandle::BottomRight => {
+                                    let d = delta_norm.x;
+                                    crop_rect.max.x += d;
+                                    crop_rect.max.y += d / norm_aspect;
+                                }
+                                // For side handles, we can adjust the other dimension to match
+                                ResizeHandle::Left => {
+                                    crop_rect.min.x += delta_norm.x;
+                                    // Update height to match new width
+                                    let w = crop_rect.width();
+                                    let h = w / norm_aspect;
+                                    let center = crop_rect.center().y;
+                                    crop_rect.min.y = center - h / 2.0;
+                                    crop_rect.max.y = center + h / 2.0;
+                                }
+                                ResizeHandle::Right => {
+                                    crop_rect.max.x += delta_norm.x;
+                                    let w = crop_rect.width();
+                                    let h = w / norm_aspect;
+                                    let center = crop_rect.center().y;
+                                    crop_rect.min.y = center - h / 2.0;
+                                    crop_rect.max.y = center + h / 2.0;
+                                }
+                                ResizeHandle::Top => {
+                                    crop_rect.min.y += delta_norm.y;
+                                    let h = crop_rect.height();
+                                    let w = h * norm_aspect;
+                                    let center = crop_rect.center().x;
+                                    crop_rect.min.x = center - w / 2.0;
+                                    crop_rect.max.x = center + w / 2.0;
+                                }
+                                ResizeHandle::Bottom => {
+                                    crop_rect.max.y += delta_norm.y;
+                                    let h = crop_rect.height();
+                                    let w = h * norm_aspect;
+                                    let center = crop_rect.center().x;
+                                    crop_rect.min.x = center - w / 2.0;
+                                    crop_rect.max.x = center + w / 2.0;
+                                }
+                            }
+                        } else {
+                            // Free resize
+                            match handle {
+                                ResizeHandle::Center => {
+                                    *crop_rect = crop_rect.translate(delta_norm);
+                                }
+                                ResizeHandle::TopLeft => {
+                                    crop_rect.min += delta_norm;
+                                }
+                                ResizeHandle::TopRight => {
+                                    crop_rect.min.y += delta_norm.y;
+                                    crop_rect.max.x += delta_norm.x;
+                                }
+                                ResizeHandle::BottomLeft => {
+                                    crop_rect.min.x += delta_norm.x;
+                                    crop_rect.max.y += delta_norm.y;
+                                }
+                                ResizeHandle::BottomRight => {
+                                    crop_rect.max += delta_norm;
+                                }
+                                ResizeHandle::Top => {
+                                    crop_rect.min.y += delta_norm.y;
+                                }
+                                ResizeHandle::Bottom => {
+                                    crop_rect.max.y += delta_norm.y;
+                                }
+                                ResizeHandle::Left => {
+                                    crop_rect.min.x += delta_norm.x;
+                                }
+                                ResizeHandle::Right => {
+                                    crop_rect.max.x += delta_norm.x;
+                                }
+                            }
+                        }
+
+                        // Clamp and ensure min < max
+                        if crop_rect.min.x < 0.0 {
+                            crop_rect.min.x = 0.0;
+                        }
+                        if crop_rect.min.y < 0.0 {
+                            crop_rect.min.y = 0.0;
+                        }
+                        if crop_rect.max.x > 1.0 {
+                            crop_rect.max.x = 1.0;
+                        }
+                        if crop_rect.max.y > 1.0 {
+                            crop_rect.max.y = 1.0;
+                        }
+                        // TODO: Ensure min < max
+                        if crop_rect.min.x > crop_rect.max.x {
+                            std::mem::swap(&mut crop_rect.min.x, &mut crop_rect.max.x);
+                        }
+                        if crop_rect.min.y > crop_rect.max.y {
+                            std::mem::swap(&mut crop_rect.min.y, &mut crop_rect.max.y);
+                        }
+
+                        // Re-calculate screen rect for display after modification
+                        screen_crop_rect = egui::Rect::from_min_max(
+                            rect.lerp_inside(crop_rect.min.to_vec2()),
+                            rect.lerp_inside(crop_rect.max.to_vec2()),
+                        );
+                    }
+                }
+
+                if response.drag_stopped() {
+                    self.selected_handle = None;
+                }
+
+                // Draw overlay (dimmed area outside crop)
+                let overlay_color = egui::Color32::from_black_alpha(150);
+
+                // Top
+                painter.rect_filled(
+                    egui::Rect::from_min_max(
+                        rect.min,
+                        egui::pos2(rect.max.x, screen_crop_rect.min.y),
+                    ),
+                    0.0,
+                    overlay_color,
+                );
+                // Bottom
+                painter.rect_filled(
+                    egui::Rect::from_min_max(
+                        egui::pos2(rect.min.x, screen_crop_rect.max.y),
+                        rect.max,
+                    ),
+                    0.0,
+                    overlay_color,
+                );
+                // Left
+                painter.rect_filled(
+                    egui::Rect::from_min_max(
+                        egui::pos2(rect.min.x, screen_crop_rect.min.y),
+                        egui::pos2(screen_crop_rect.min.x, screen_crop_rect.max.y),
+                    ),
+                    0.0,
+                    overlay_color,
+                );
+                // Right
+                painter.rect_filled(
+                    egui::Rect::from_min_max(
+                        egui::pos2(screen_crop_rect.max.x, screen_crop_rect.min.y),
+                        egui::pos2(rect.max.x, screen_crop_rect.max.y),
+                    ),
+                    0.0,
+                    overlay_color,
+                );
+
+                // Draw crop border
+                painter.rect_stroke(
+                    screen_crop_rect,
+                    0.0,
+                    egui::Stroke::new(1.0, egui::Color32::WHITE),
+                );
+
+                // Draw handles
+                let handle_radius = 5.0;
+                let handle_color = egui::Color32::WHITE;
+
+                let handles = [
+                    screen_crop_rect.min,
+                    screen_crop_rect.max,
+                    egui::pos2(screen_crop_rect.min.x, screen_crop_rect.max.y),
+                    egui::pos2(screen_crop_rect.max.x, screen_crop_rect.min.y),
+                    screen_crop_rect.center_top(),
+                    screen_crop_rect.center_bottom(),
+                    screen_crop_rect.left_center(),
+                    screen_crop_rect.right_center(),
+                ];
+
+                for pos in handles {
+                    painter.circle_filled(pos, handle_radius, handle_color);
+                }
+            }
+        });
+    }
+}
+
+fn main() -> eframe::Result {
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_inner_size([800.0, 600.0]),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "Image Cropper",
+        options,
+        Box::new(|cc| Ok(Box::new(ImageCropper::new(cc)))),
+    )
 }
