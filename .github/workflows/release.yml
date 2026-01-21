@@ -24,13 +24,12 @@ jobs:
         run: cargo install cargo-bundle
       - name: Build and Bundle
         run: cargo bundle --release --target ${{ matrix.target }}
-      - name: Compress Bundle
+      - name: Prepare Artifact
         run: |
-          cd target/${{ matrix.target }}/release/bundle/osx
-          mv "ImageCropper.app" "ImageCropper-${{ matrix.target }}.app"
-          zip -r "ImageCropper-${{ matrix.target }}.zip" "ImageCropper-${{ matrix.target }}.app"
+          mkdir staging
+          cp -r target/${{ matrix.target }}/release/bundle/osx/ImageCropper.app staging/
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ImageCropper-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/bundle/osx/ImageCropper-${{ matrix.target }}.zip
+          path: staging/
