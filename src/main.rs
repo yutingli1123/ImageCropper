@@ -32,6 +32,28 @@ enum AspectRatioMode {
     Custom,
 }
 
+impl Default for AspectRatioMode {
+    fn default() -> Self {
+        Self::Free
+    }
+}
+
+impl AspectRatioMode {
+    fn counterpart(&self) -> Self {
+        match self {
+            AspectRatioMode::R3_2 => AspectRatioMode::R2_3,
+            AspectRatioMode::R4_3 => AspectRatioMode::R3_4,
+            AspectRatioMode::R16_9 => AspectRatioMode::R9_16,
+            AspectRatioMode::R16_10 => AspectRatioMode::R10_16,
+            AspectRatioMode::R2_3 => AspectRatioMode::R3_2,
+            AspectRatioMode::R3_4 => AspectRatioMode::R4_3,
+            AspectRatioMode::R9_16 => AspectRatioMode::R16_9,
+            AspectRatioMode::R10_16 => AspectRatioMode::R16_10,
+            _ => self.clone(),
+        }
+    }
+}
+
 #[derive(Default)]
 struct ImageCropper {
     image: Option<DynamicImage>,
@@ -41,12 +63,7 @@ struct ImageCropper {
     aspect_ratio_mode: AspectRatioMode,
     custom_w: u32,
     custom_h: u32,
-}
-
-impl Default for AspectRatioMode {
-    fn default() -> Self {
-        Self::Free
-    }
+    is_portrait: bool,
 }
 
 impl ImageCropper {
@@ -54,6 +71,7 @@ impl ImageCropper {
         Self {
             custom_w: 4,
             custom_h: 3,
+            is_portrait: false,
             ..Default::default()
         }
     }
@@ -228,7 +246,6 @@ impl eframe::App for ImageCropper {
                     egui::ComboBox::from_id_salt("params_aspect_ratio")
                         .selected_text(format!("{}", self.aspect_ratio_mode))
                         .show_ui(ui, |ui| {
-                            ui.label("General");
                             changed |= ui
                                 .selectable_value(
                                     &mut self.aspect_ratio_mode,
@@ -252,66 +269,65 @@ impl eframe::App for ImageCropper {
                                 .changed();
 
                             ui.separator();
-                            ui.label("Landscape");
-                            changed |= ui
-                                .selectable_value(
-                                    &mut self.aspect_ratio_mode,
-                                    AspectRatioMode::R3_2,
-                                    "3:2",
-                                )
-                                .changed();
-                            changed |= ui
-                                .selectable_value(
-                                    &mut self.aspect_ratio_mode,
-                                    AspectRatioMode::R4_3,
-                                    "4:3",
-                                )
-                                .changed();
-                            changed |= ui
-                                .selectable_value(
-                                    &mut self.aspect_ratio_mode,
-                                    AspectRatioMode::R16_9,
-                                    "16:9",
-                                )
-                                .changed();
-                            changed |= ui
-                                .selectable_value(
-                                    &mut self.aspect_ratio_mode,
-                                    AspectRatioMode::R16_10,
-                                    "16:10",
-                                )
-                                .changed();
-
-                            ui.separator();
-                            ui.label("Portrait");
-                            changed |= ui
-                                .selectable_value(
-                                    &mut self.aspect_ratio_mode,
-                                    AspectRatioMode::R2_3,
-                                    "2:3",
-                                )
-                                .changed();
-                            changed |= ui
-                                .selectable_value(
-                                    &mut self.aspect_ratio_mode,
-                                    AspectRatioMode::R3_4,
-                                    "3:4",
-                                )
-                                .changed();
-                            changed |= ui
-                                .selectable_value(
-                                    &mut self.aspect_ratio_mode,
-                                    AspectRatioMode::R9_16,
-                                    "9:16",
-                                )
-                                .changed();
-                            changed |= ui
-                                .selectable_value(
-                                    &mut self.aspect_ratio_mode,
-                                    AspectRatioMode::R10_16,
-                                    "10:16",
-                                )
-                                .changed();
+                            if !self.is_portrait {
+                                changed |= ui
+                                    .selectable_value(
+                                        &mut self.aspect_ratio_mode,
+                                        AspectRatioMode::R3_2,
+                                        "3:2",
+                                    )
+                                    .changed();
+                                changed |= ui
+                                    .selectable_value(
+                                        &mut self.aspect_ratio_mode,
+                                        AspectRatioMode::R4_3,
+                                        "4:3",
+                                    )
+                                    .changed();
+                                changed |= ui
+                                    .selectable_value(
+                                        &mut self.aspect_ratio_mode,
+                                        AspectRatioMode::R16_9,
+                                        "16:9",
+                                    )
+                                    .changed();
+                                changed |= ui
+                                    .selectable_value(
+                                        &mut self.aspect_ratio_mode,
+                                        AspectRatioMode::R16_10,
+                                        "16:10",
+                                    )
+                                    .changed();
+                            } else {
+                                changed |= ui
+                                    .selectable_value(
+                                        &mut self.aspect_ratio_mode,
+                                        AspectRatioMode::R2_3,
+                                        "2:3",
+                                    )
+                                    .changed();
+                                changed |= ui
+                                    .selectable_value(
+                                        &mut self.aspect_ratio_mode,
+                                        AspectRatioMode::R3_4,
+                                        "3:4",
+                                    )
+                                    .changed();
+                                changed |= ui
+                                    .selectable_value(
+                                        &mut self.aspect_ratio_mode,
+                                        AspectRatioMode::R9_16,
+                                        "9:16",
+                                    )
+                                    .changed();
+                                changed |= ui
+                                    .selectable_value(
+                                        &mut self.aspect_ratio_mode,
+                                        AspectRatioMode::R10_16,
+                                        "10:16",
+                                    )
+                                    .changed();
+                            }
 
                             ui.separator();
                             changed |= ui
@@ -322,6 +338,16 @@ impl eframe::App for ImageCropper {
                                 )
                                 .changed();
                         });
+
+                    if ui.button("🔄").clicked() {
+                        self.is_portrait = !self.is_portrait;
+                        if self.aspect_ratio_mode == AspectRatioMode::Custom {
+                            std::mem::swap(&mut self.custom_w, &mut self.custom_h);
+                        } else {
+                            self.aspect_ratio_mode = self.aspect_ratio_mode.counterpart();
+                        }
+                        changed = true;
+                    }
 
                     if self.aspect_ratio_mode == AspectRatioMode::Custom {
                         changed |= ui
