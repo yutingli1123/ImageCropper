@@ -1,35 +1,87 @@
-name: Build macOS App
+name: Release
 
 on:
   push:
-    branches: ["main"]
+    tags:
+      - "v*"
   workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-macos:
-    name: Build macOS (${{ matrix.target }})
-    runs-on: macos-latest
+  build-release:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        target: [x86_64-apple-darwin, aarch64-apple-darwin]
+        include:
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: ImageCropper
+            asset_name: ImageCropper-macos-x86_64
+            use_bundle: true
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: ImageCropper
+            asset_name: ImageCropper-macos-aarch64
+            use_bundle: true
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: ImageCropper
+            asset_name: ImageCropper-linux-x86_64
+            use_bundle: false
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: ImageCropper.exe
+            asset_name: ImageCropper-windows-x86_64
+            use_bundle: false
+
     steps:
       - uses: actions/checkout@v3
+
+      - name: Install Linux Dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
       - name: Install cargo-bundle
+        if: matrix.use_bundle == true
         run: cargo install cargo-bundle
-      - name: Build and Bundle
+
+      - name: Build (Binary)
+        if: matrix.use_bundle == false
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build (Bundle)
+        if: matrix.use_bundle == true
         run: cargo bundle --release --target ${{ matrix.target }}
-      - name: Prepare Artifact
+
+      - name: Zip Artifact (MacOS)
+        if: matrix.use_bundle == true
         run: |
-          mkdir staging
-          cp -r target/${{ matrix.target }}/release/bundle/osx/ImageCropper.app staging/
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+          cd target/${{ matrix.target }}/release/bundle/osx/
+          zip -r ../../../../../${{ matrix.asset_name }}.zip ${{ matrix.artifact_name }}.app
+
+      - name: Zip Artifact (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd target/${{ matrix.target }}/release/
+          zip ../../../${{ matrix.asset_name }}.zip ${{ matrix.artifact_name }}
+
+      - name: Zip Artifact (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release/
+          7z a ../../../${{ matrix.asset_name }}.zip ${{ matrix.artifact_name }}
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          name: ImageCropper-${{ matrix.target }}
-          path: staging/
+          files: ${{ matrix.asset_name }}.zip
