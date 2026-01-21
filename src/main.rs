@@ -225,6 +225,20 @@ impl std::fmt::Display for AspectRatioMode {
 
 impl eframe::App for ImageCropper {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Handle dropped files
+        if !ctx.input(|i| i.raw.dropped_files.is_empty()) {
+            let dropped_files = ctx.input(|i| i.raw.dropped_files.clone());
+            if let Some(file) = dropped_files.first() {
+                if let Some(path) = &file.path {
+                    if let Ok(img) = image::open(path) {
+                        self.image = Some(img);
+                        self.load_texture(ctx);
+                        self.selected_handle = None;
+                    }
+                }
+            }
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             if ui.button("Open Image").clicked() {
                 if let Some(path) = rfd::FileDialog::new()
