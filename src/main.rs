@@ -360,28 +360,39 @@ impl eframe::App for ImageCropper {
             }
 
             if let (Some(texture), Some(crop_rect)) = (&self.texture, &mut self.crop_rect) {
+                const PADDING: f32 = 20.0;
                 let available_size = ui.available_size();
+                let max_size = available_size - egui::vec2(PADDING * 2.0, PADDING * 2.0);
                 let image_size = texture.size_vec2();
 
                 // Calculate size to fit within available space while maintaining aspect ratio
-                let scale = (available_size.x / image_size.x).min(available_size.y / image_size.y);
+                let scale = (max_size.x / image_size.x).min(max_size.y / image_size.y);
                 let display_size = image_size * scale;
 
-                let (response, painter) = ui.allocate_painter(display_size, egui::Sense::drag());
-                let rect = response.rect;
+                let (response, painter) = ui.allocate_painter(
+                    display_size + egui::vec2(PADDING * 2.0, PADDING * 2.0),
+                    egui::Sense::drag(),
+                );
+
+                // Center the image rect within the response rect (which includes padding)
+                // Actually simple way: start at min + padding
+                let image_rect = egui::Rect::from_min_size(
+                    response.rect.min + egui::vec2(PADDING, PADDING),
+                    display_size,
+                );
 
                 // Draw image
                 painter.image(
                     texture.id(),
-                    rect,
+                    image_rect,
                     egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                     egui::Color32::WHITE,
                 );
 
                 // Convert normalized crop rect to screen coordinates
                 let mut screen_crop_rect = egui::Rect::from_min_max(
-                    rect.lerp_inside(crop_rect.min.to_vec2()),
-                    rect.lerp_inside(crop_rect.max.to_vec2()),
+                    image_rect.lerp_inside(crop_rect.min.to_vec2()),
+                    image_rect.lerp_inside(crop_rect.max.to_vec2()),
                 );
 
                 // Handle Input
@@ -535,8 +546,8 @@ impl eframe::App for ImageCropper {
 
                         // Re-calculate screen rect for display after modification
                         screen_crop_rect = egui::Rect::from_min_max(
-                            rect.lerp_inside(crop_rect.min.to_vec2()),
-                            rect.lerp_inside(crop_rect.max.to_vec2()),
+                            image_rect.lerp_inside(crop_rect.min.to_vec2()),
+                            image_rect.lerp_inside(crop_rect.max.to_vec2()),
                         );
                     }
                 }
@@ -551,8 +562,8 @@ impl eframe::App for ImageCropper {
                 // Top
                 painter.rect_filled(
                     egui::Rect::from_min_max(
-                        rect.min,
-                        egui::pos2(rect.max.x, screen_crop_rect.min.y),
+                        image_rect.min,
+                        egui::pos2(image_rect.max.x, screen_crop_rect.min.y),
                     ),
                     0.0,
                     overlay_color,
@@ -560,8 +571,8 @@ impl eframe::App for ImageCropper {
                 // Bottom
                 painter.rect_filled(
                     egui::Rect::from_min_max(
-                        egui::pos2(rect.min.x, screen_crop_rect.max.y),
-                        rect.max,
+                        egui::pos2(image_rect.min.x, screen_crop_rect.max.y),
+                        image_rect.max,
                     ),
                     0.0,
                     overlay_color,
@@ -569,7 +580,7 @@ impl eframe::App for ImageCropper {
                 // Left
                 painter.rect_filled(
                     egui::Rect::from_min_max(
-                        egui::pos2(rect.min.x, screen_crop_rect.min.y),
+                        egui::pos2(image_rect.min.x, screen_crop_rect.min.y),
                         egui::pos2(screen_crop_rect.min.x, screen_crop_rect.max.y),
                     ),
                     0.0,
@@ -579,7 +590,7 @@ impl eframe::App for ImageCropper {
                 painter.rect_filled(
                     egui::Rect::from_min_max(
                         egui::pos2(screen_crop_rect.max.x, screen_crop_rect.min.y),
-                        egui::pos2(rect.max.x, screen_crop_rect.max.y),
+                        egui::pos2(image_rect.max.x, screen_crop_rect.max.y),
                     ),
                     0.0,
                     overlay_color,
