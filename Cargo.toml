@@ -9,7 +9,7 @@ image = { version = "0.25.5", features = ["jpeg", "png"] }
 rfd = "0.15.1"
 
 [package.metadata.bundle]
-name = "Image Cropper"
+name = "ImageCropper"
 identifier = "com.example.imagecropper"
 icon = ["32x32.png", "128x128.png", "256x256.png", "512x512.png"]
 version = "0.1.0"
