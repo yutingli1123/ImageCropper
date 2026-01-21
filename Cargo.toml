@@ -1,6 +1,6 @@
 [package]
 name = "ImageCropper"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 
 [dependencies]
@@ -12,7 +12,7 @@ rfd = "0.15.1"
 name = "ImageCropper"
 identifier = "com.example.imagecropper"
 icon = ["32x32.png", "128x128.png", "256x256.png", "512x512.png"]
-version = "0.1.2"
+version = "0.1.3"
 copyright = "Copyright 2024"
 category = "Productivity"
 short_description = "A simple image cropping tool."
