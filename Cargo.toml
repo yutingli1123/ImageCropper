@@ -7,3 +7,16 @@ edition = "2024"
 eframe = "0.29.1"
 image = { version = "0.25.5", features = ["jpeg", "png"] }
 rfd = "0.15.1"
+
+[package.metadata.bundle]
+name = "Image Cropper"
+identifier = "com.example.imagecropper"
+icon = ["32x32.png", "128x128.png", "256x256.png", "512x512.png"]
+version = "0.1.0"
+copyright = "Copyright 2024"
+category = "Productivity"
+short_description = "A simple image cropping tool."
+long_description = """
+A simple and efficient image cropping tool written in Rust using eframe/egui.
+Supports drag and drop, aspect ratio rotation, and more.
+"""
