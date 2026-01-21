@@ -19,8 +19,14 @@ enum AspectRatioMode {
     Free,
     Original,
     Square,
+    // Landscape
+    R3_2,
     R4_3,
     R16_9,
+    // Portrait
+    R2_3,
+    R3_4,
+    R9_16,
     Custom,
 }
 
@@ -73,8 +79,12 @@ impl ImageCropper {
                 AspectRatioMode::Free => None,
                 AspectRatioMode::Original => Some(image_size.x / image_size.y),
                 AspectRatioMode::Square => Some(1.0),
+                AspectRatioMode::R3_2 => Some(3.0 / 2.0),
                 AspectRatioMode::R4_3 => Some(4.0 / 3.0),
                 AspectRatioMode::R16_9 => Some(16.0 / 9.0),
+                AspectRatioMode::R2_3 => Some(2.0 / 3.0),
+                AspectRatioMode::R3_4 => Some(3.0 / 4.0),
+                AspectRatioMode::R9_16 => Some(9.0 / 16.0),
                 AspectRatioMode::Custom => Some(self.custom_w as f32 / self.custom_h as f32),
             };
 
@@ -82,23 +92,31 @@ impl ImageCropper {
                 // Calculate normalized target aspect ratio
                 let norm_aspect = ratio * (image_size.y / image_size.x);
                 let current_center = crop_rect.center();
+                let current_w = crop_rect.width();
+                let current_h = crop_rect.height();
 
-                // Try to fit the new ratio within the current crop width/height
-                // We want new_w / new_h = norm_aspect
+                // Preserve major dimension logic
+                let max_dim = current_w.max(current_h);
 
-                let mut new_w = crop_rect.width();
-                let mut new_h = new_w / norm_aspect;
+                let (mut new_w, mut new_h) = if norm_aspect >= 1.0 {
+                    (max_dim, max_dim / norm_aspect)
+                } else {
+                    (max_dim * norm_aspect, max_dim)
+                };
 
-                if new_h > crop_rect.height() {
-                    new_h = crop_rect.height();
+                // Fit to bounds if necessary
+                if new_w > 1.0 {
+                    new_w = 1.0;
+                    new_h = new_w / norm_aspect;
+                }
+                if new_h > 1.0 {
+                    new_h = 1.0;
                     new_w = new_h * norm_aspect;
                 }
 
                 *crop_rect = egui::Rect::from_center_size(current_center, egui::vec2(new_w, new_h));
 
-                // Ensure it stays within 0.0-1.0 bounds logic if needed,
-                // but simpler to let user adjust if it clips slightly or clamp it.
-                // Let's simple clamp for now to be safe.
+                // Ensure it stays within 0.0-1.0 bounds logic
                 if crop_rect.min.x < 0.0 {
                     *crop_rect = crop_rect.translate(egui::vec2(-crop_rect.min.x, 0.0));
                 }
@@ -188,6 +206,7 @@ impl eframe::App for ImageCropper {
                     egui::ComboBox::from_id_salt("params_aspect_ratio")
                         .selected_text(format!("{:?}", self.aspect_ratio_mode))
                         .show_ui(ui, |ui| {
+                            ui.label("General");
                             changed |= ui
                                 .selectable_value(
                                     &mut self.aspect_ratio_mode,
@@ -209,6 +228,16 @@ impl eframe::App for ImageCropper {
                                     "1:1",
                                 )
                                 .changed();
+
+                            ui.separator();
+                            ui.label("Landscape");
+                            changed |= ui
+                                .selectable_value(
+                                    &mut self.aspect_ratio_mode,
+                                    AspectRatioMode::R3_2,
+                                    "3:2",
+                                )
+                                .changed();
                             changed |= ui
                                 .selectable_value(
                                     &mut self.aspect_ratio_mode,
@@ -223,6 +252,32 @@ impl eframe::App for ImageCropper {
                                     "16:9",
                                 )
                                 .changed();
+
+                            ui.separator();
+                            ui.label("Portrait");
+                            changed |= ui
+                                .selectable_value(
+                                    &mut self.aspect_ratio_mode,
+                                    AspectRatioMode::R2_3,
+                                    "2:3",
+                                )
+                                .changed();
+                            changed |= ui
+                                .selectable_value(
+                                    &mut self.aspect_ratio_mode,
+                                    AspectRatioMode::R3_4,
+                                    "3:4",
+                                )
+                                .changed();
+                            changed |= ui
+                                .selectable_value(
+                                    &mut self.aspect_ratio_mode,
+                                    AspectRatioMode::R9_16,
+                                    "9:16",
+                                )
+                                .changed();
+
+                            ui.separator();
                             changed |= ui
                                 .selectable_value(
                                     &mut self.aspect_ratio_mode,
@@ -328,8 +383,12 @@ impl eframe::App for ImageCropper {
                             AspectRatioMode::Free => None,
                             AspectRatioMode::Original => Some(image_size.x / image_size.y),
                             AspectRatioMode::Square => Some(1.0),
+                            AspectRatioMode::R3_2 => Some(3.0 / 2.0),
                             AspectRatioMode::R4_3 => Some(4.0 / 3.0),
                             AspectRatioMode::R16_9 => Some(16.0 / 9.0),
+                            AspectRatioMode::R2_3 => Some(2.0 / 3.0),
+                            AspectRatioMode::R3_4 => Some(3.0 / 4.0),
+                            AspectRatioMode::R9_16 => Some(9.0 / 16.0),
                             AspectRatioMode::Custom => {
                                 Some(self.custom_w as f32 / self.custom_h as f32)
                             }
@@ -514,8 +573,9 @@ impl eframe::App for ImageCropper {
                 );
 
                 // Draw handles
-                let handle_radius = 5.0;
-                let handle_color = egui::Color32::WHITE;
+                let handle_radius = 6.0;
+                let handle_stroke = egui::Stroke::new(1.0, egui::Color32::BLACK);
+                let handle_fill = egui::Color32::WHITE;
 
                 let handles = [
                     screen_crop_rect.min,
@@ -529,7 +589,7 @@ impl eframe::App for ImageCropper {
                 ];
 
                 for pos in handles {
-                    painter.circle_filled(pos, handle_radius, handle_color);
+                    painter.circle(pos, handle_radius, handle_fill, handle_stroke);
                 }
             }
         });
