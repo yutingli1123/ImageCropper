@@ -31,7 +31,8 @@ struct ImageCropper {
     crop_rect: Option<egui::Rect>, // Normalized coordinates (0.0-1.0)
     selected_handle: Option<ResizeHandle>,
     aspect_ratio_mode: AspectRatioMode,
-    custom_ratio: Option<f32>, // Width / Height
+    custom_w: u32,
+    custom_h: u32,
 }
 
 impl Default for AspectRatioMode {
@@ -42,7 +43,11 @@ impl Default for AspectRatioMode {
 
 impl ImageCropper {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        Self::default()
+        Self {
+            custom_w: 4,
+            custom_h: 3,
+            ..Default::default()
+        }
     }
 
     fn load_texture(&mut self, ctx: &egui::Context) {
@@ -119,88 +124,89 @@ impl eframe::App for ImageCropper {
                 }
             }
 
-            ui.horizontal(|ui| {
-                ui.label("Aspect Ratio:");
-                egui::ComboBox::from_id_salt("params_aspect_ratio")
-                    .selected_text(format!("{:?}", self.aspect_ratio_mode))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut self.aspect_ratio_mode,
-                            AspectRatioMode::Free,
-                            "Free",
-                        );
-                        ui.selectable_value(
-                            &mut self.aspect_ratio_mode,
-                            AspectRatioMode::Original,
-                            "Original",
-                        );
-                        ui.selectable_value(
-                            &mut self.aspect_ratio_mode,
-                            AspectRatioMode::Square,
-                            "1:1",
-                        );
-                        ui.selectable_value(
-                            &mut self.aspect_ratio_mode,
-                            AspectRatioMode::R4_3,
-                            "4:3",
-                        );
-                        ui.selectable_value(
-                            &mut self.aspect_ratio_mode,
-                            AspectRatioMode::R16_9,
-                            "16:9",
-                        );
-                        ui.selectable_value(
-                            &mut self.aspect_ratio_mode,
-                            AspectRatioMode::Custom,
-                            "Custom",
-                        );
-                    });
+            if self.texture.is_some() {
+                ui.horizontal(|ui| {
+                    ui.label("Aspect Ratio:");
+                    egui::ComboBox::from_id_salt("params_aspect_ratio")
+                        .selected_text(format!("{:?}", self.aspect_ratio_mode))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.aspect_ratio_mode,
+                                AspectRatioMode::Free,
+                                "Free",
+                            );
+                            ui.selectable_value(
+                                &mut self.aspect_ratio_mode,
+                                AspectRatioMode::Original,
+                                "Original",
+                            );
+                            ui.selectable_value(
+                                &mut self.aspect_ratio_mode,
+                                AspectRatioMode::Square,
+                                "1:1",
+                            );
+                            ui.selectable_value(
+                                &mut self.aspect_ratio_mode,
+                                AspectRatioMode::R4_3,
+                                "4:3",
+                            );
+                            ui.selectable_value(
+                                &mut self.aspect_ratio_mode,
+                                AspectRatioMode::R16_9,
+                                "16:9",
+                            );
+                            ui.selectable_value(
+                                &mut self.aspect_ratio_mode,
+                                AspectRatioMode::Custom,
+                                "Custom",
+                            );
+                        });
 
-                if self.aspect_ratio_mode == AspectRatioMode::Custom {
-                    let mut r = self.custom_ratio.unwrap_or(1.0);
-                    if ui
-                        .add(
-                            egui::DragValue::new(&mut r)
+                    if self.aspect_ratio_mode == AspectRatioMode::Custom {
+                        ui.add(
+                            egui::DragValue::new(&mut self.custom_w)
                                 .speed(0.1)
-                                .range(0.1..=10.0)
-                                .prefix("Ratio: "),
-                        )
-                        .changed()
-                    {
-                        self.custom_ratio = Some(r);
+                                .range(1..=100),
+                        );
+                        ui.label(":");
+                        ui.add(
+                            egui::DragValue::new(&mut self.custom_h)
+                                .speed(0.1)
+                                .range(1..=100),
+                        );
                     }
-                }
 
-                if ui.button("Save Cropped Image").clicked() {
-                    if let (Some(image), Some(crop_rect)) = (&self.image, self.crop_rect) {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("Image", &["png", "jpg", "jpeg", "bmp"])
-                            .save_file()
-                        {
-                            let w = image.width() as f32;
-                            let h = image.height() as f32;
+                    if ui.button("Save Cropped Image").clicked() {
+                        if let (Some(image), Some(crop_rect)) = (&self.image, self.crop_rect) {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter("Image", &["png", "jpg", "jpeg", "bmp"])
+                                .save_file()
+                            {
+                                let w = image.width() as f32;
+                                let h = image.height() as f32;
 
-                            let x = (crop_rect.min.x * w).max(0.0) as u32;
-                            let y = (crop_rect.min.y * h).max(0.0) as u32;
-                            let width = (crop_rect.width() * w).max(1.0) as u32;
-                            let height = (crop_rect.height() * h).max(1.0) as u32;
+                                let x = (crop_rect.min.x * w).max(0.0) as u32;
+                                let y = (crop_rect.min.y * h).max(0.0) as u32;
+                                let width = (crop_rect.width() * w).max(1.0) as u32;
+                                let height = (crop_rect.height() * h).max(1.0) as u32;
 
-                            // Ensure bounds
-                            let x = x.min(image.width() - 1);
-                            let y = y.min(image.height() - 1);
-                            let width = width.min(image.width() - x);
-                            let height = height.min(image.height() - y);
+                                // Ensure bounds
+                                let x = x.min(image.width() - 1);
+                                let y = y.min(image.height() - 1);
+                                let width = width.min(image.width() - x);
+                                let height = height.min(image.height() - y);
 
-                            let cropped = image.crop_imm(x, y, width, height);
-                            if let Err(e) = cropped.save(path) {
-                                eprintln!("Failed to save image: {}", e);
+                                let cropped = image.crop_imm(x, y, width, height);
+                                if let Err(e) = cropped.save(path) {
+                                    eprintln!("Failed to save image: {}", e);
+                                }
                             }
                         }
                     }
-                }
-            });
+                });
 
-            ui.separator();
+                ui.separator();
+            }
 
             if let (Some(texture), Some(crop_rect)) = (&self.texture, &mut self.crop_rect) {
                 let available_size = ui.available_size();
@@ -246,7 +252,9 @@ impl eframe::App for ImageCropper {
                             AspectRatioMode::Square => Some(1.0),
                             AspectRatioMode::R4_3 => Some(4.0 / 3.0),
                             AspectRatioMode::R16_9 => Some(16.0 / 9.0),
-                            AspectRatioMode::Custom => self.custom_ratio,
+                            AspectRatioMode::Custom => {
+                                Some(self.custom_w as f32 / self.custom_h as f32)
+                            }
                         };
 
                         if let Some(ratio) = target_ratio {
