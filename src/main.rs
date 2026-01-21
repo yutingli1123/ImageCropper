@@ -185,11 +185,29 @@ impl ImageCropper {
     }
 }
 
+impl std::fmt::Display for AspectRatioMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            AspectRatioMode::Free => "Free",
+            AspectRatioMode::Original => "Original",
+            AspectRatioMode::Square => "1:1",
+            AspectRatioMode::R3_2 => "3:2",
+            AspectRatioMode::R4_3 => "4:3",
+            AspectRatioMode::R16_9 => "16:9",
+            AspectRatioMode::R16_10 => "16:10",
+            AspectRatioMode::R2_3 => "2:3",
+            AspectRatioMode::R3_4 => "3:4",
+            AspectRatioMode::R9_16 => "9:16",
+            AspectRatioMode::R10_16 => "10:16",
+            AspectRatioMode::Custom => "Custom",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 impl eframe::App for ImageCropper {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Image Cropper");
-
             if ui.button("Open Image").clicked() {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("Image", &["png", "jpg", "jpeg", "bmp"])
@@ -208,7 +226,7 @@ impl eframe::App for ImageCropper {
                     ui.label("Aspect Ratio:");
                     let mut changed = false;
                     egui::ComboBox::from_id_salt("params_aspect_ratio")
-                        .selected_text(format!("{:?}", self.aspect_ratio_mode))
+                        .selected_text(format!("{}", self.aspect_ratio_mode))
                         .show_ui(ui, |ui| {
                             ui.label("General");
                             changed |= ui
