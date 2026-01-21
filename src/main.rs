@@ -489,44 +489,177 @@ impl eframe::App for ImageCropper {
                             }
                         };
 
-                        if let Some(_ratio) = target_ratio {
+                        let norm_aspect = target_ratio.map(|r| r * (image_size.y / image_size.x));
+
+                        if let (Some(ratio), Some(norm_aspect)) = (target_ratio, norm_aspect) {
                             // Constrained resize
+                            // Helper to convert normalized width/height to screen space
+                            let to_screen = |w_norm: f32, h_norm: f32| -> egui::Vec2 {
+                                egui::vec2(w_norm * display_size.x, h_norm * display_size.y)
+                            };
+                            // Helper to convert screen dimensions back to normalized space dimensions
+                            let to_norm = |w_screen: f32, h_screen: f32| -> egui::Vec2 {
+                                egui::vec2(w_screen / display_size.x, h_screen / display_size.y)
+                            };
+
                             match handle {
                                 ResizeHandle::Center => {
-                                    *crop_rect = crop_rect.translate(delta_norm);
+                                    // Safe Panning: constrain delta to stay within bounds
+                                    let mut final_delta = delta_norm;
+                                    if crop_rect.min.x + final_delta.x < 0.0 {
+                                        final_delta.x = -crop_rect.min.x;
+                                    }
+                                    if crop_rect.max.x + final_delta.x > 1.0 {
+                                        final_delta.x = 1.0 - crop_rect.max.x;
+                                    }
+                                    if crop_rect.min.y + final_delta.y < 0.0 {
+                                        final_delta.y = -crop_rect.min.y;
+                                    }
+                                    if crop_rect.max.y + final_delta.y > 1.0 {
+                                        final_delta.y = 1.0 - crop_rect.max.y;
+                                    }
+
+                                    *crop_rect = crop_rect.translate(final_delta);
                                 }
-                                ResizeHandle::TopLeft => {
-                                    crop_rect.min += delta_norm;
+                                // Corner Handles: Use projection logic for smooth interactions
+                                ResizeHandle::TopLeft
+                                | ResizeHandle::TopRight
+                                | ResizeHandle::BottomLeft
+                                | ResizeHandle::BottomRight => {
+                                    // 1. Identify Anchor (Fixed Point) and current Corner
+                                    let (anchor, mut corner) = match handle {
+                                        ResizeHandle::TopLeft => (crop_rect.max, crop_rect.min),
+                                        ResizeHandle::TopRight => (
+                                            egui::pos2(crop_rect.min.x, crop_rect.max.y),
+                                            egui::pos2(crop_rect.max.x, crop_rect.min.y),
+                                        ),
+                                        ResizeHandle::BottomLeft => (
+                                            egui::pos2(crop_rect.max.x, crop_rect.min.y),
+                                            egui::pos2(crop_rect.min.x, crop_rect.max.y),
+                                        ),
+                                        ResizeHandle::BottomRight => (crop_rect.min, crop_rect.max),
+                                        _ => (egui::Pos2::ZERO, egui::Pos2::ZERO), // Unreachable
+                                    };
+
+                                    // 2. Calculate suggested new dimensions in screen space
+                                    // Apply delta to corner
+                                    match handle {
+                                        ResizeHandle::TopLeft => corner += delta_norm,
+                                        ResizeHandle::TopRight => {
+                                            corner.y += delta_norm.y;
+                                            corner.x += delta_norm.x;
+                                        }
+                                        ResizeHandle::BottomLeft => {
+                                            corner.x += delta_norm.x;
+                                            corner.y += delta_norm.y;
+                                        }
+                                        ResizeHandle::BottomRight => corner += delta_norm,
+                                        _ => {}
+                                    }
+
+                                    // Calculate raw new width/height (absolute)
+                                    let raw_w_norm = (corner.x - anchor.x).abs();
+                                    let raw_h_norm = (corner.y - anchor.y).abs();
+                                    let raw_screen = to_screen(raw_w_norm, raw_h_norm);
+
+                                    // 3. Project onto aspect ratio vector
+                                    // Vector direction U = (ratio, 1.0)
+                                    let u = egui::vec2(ratio, 1.0);
+                                    let p = raw_screen; // Computed target vector
+                                    // Projection: (P . U) / (U . U) * U
+                                    let lambda = p.dot(u) / u.length_sq();
+                                    let constrained_screen = u * lambda;
+
+                                    // 4. Convert back to normalized and update rect
+                                    let final_dim =
+                                        to_norm(constrained_screen.x, constrained_screen.y);
+
+                                    // Reconstruct rect from Anchor
+                                    let (new_min, new_max) = match handle {
+                                        ResizeHandle::TopLeft => (anchor - final_dim, anchor),
+                                        ResizeHandle::TopRight => (
+                                            egui::pos2(anchor.x, anchor.y - final_dim.y),
+                                            egui::pos2(anchor.x + final_dim.x, anchor.y),
+                                        ),
+                                        ResizeHandle::BottomLeft => (
+                                            egui::pos2(anchor.x - final_dim.x, anchor.y),
+                                            egui::pos2(anchor.x, anchor.y + final_dim.y),
+                                        ),
+                                        ResizeHandle::BottomRight => (anchor, anchor + final_dim),
+                                        _ => (egui::Pos2::ZERO, egui::Pos2::ZERO),
+                                    };
+
+                                    // Update crop_rect (handling potential negative flips if crossed)
+                                    // But since we used .abs() and fixed anchors, we assume simple expansion/shrinkage
+                                    // However, simpler to just use from_min_max and let standardization happen later
+                                    // But our logic assumes anchor is fixed OPPOSITE corner.
+                                    *crop_rect = egui::Rect::from_min_max(new_min, new_max);
                                 }
-                                ResizeHandle::TopRight => {
-                                    crop_rect.min.y += delta_norm.y;
-                                    crop_rect.max.x += delta_norm.x;
+
+                                // Side Handles: Drive one dimension, center the other
+                                ResizeHandle::Left | ResizeHandle::Right => {
+                                    // Drive Width
+                                    let mut new_w = crop_rect.width();
+                                    match handle {
+                                        ResizeHandle::Left => {
+                                            crop_rect.min.x += delta_norm.x;
+                                            new_w -= delta_norm.x;
+                                        }
+                                        ResizeHandle::Right => {
+                                            crop_rect.max.x += delta_norm.x;
+                                            new_w += delta_norm.x;
+                                        }
+                                        _ => {}
+                                    }
+
+                                    // Constrain Height
+                                    let new_h = new_w / norm_aspect;
+                                    let old_center_y = crop_rect.center().y;
+                                    crop_rect.min.y = old_center_y - new_h * 0.5;
+                                    crop_rect.max.y = old_center_y + new_h * 0.5;
                                 }
-                                ResizeHandle::BottomLeft => {
-                                    crop_rect.min.x += delta_norm.x;
-                                    crop_rect.max.y += delta_norm.y;
-                                }
-                                ResizeHandle::BottomRight => {
-                                    crop_rect.max += delta_norm;
-                                }
-                                ResizeHandle::Top => {
-                                    crop_rect.min.y += delta_norm.y;
-                                }
-                                ResizeHandle::Bottom => {
-                                    crop_rect.max.y += delta_norm.y;
-                                }
-                                ResizeHandle::Left => {
-                                    crop_rect.min.x += delta_norm.x;
-                                }
-                                ResizeHandle::Right => {
-                                    crop_rect.max.x += delta_norm.x;
+                                ResizeHandle::Top | ResizeHandle::Bottom => {
+                                    // Drive Height
+                                    let mut new_h = crop_rect.height();
+                                    match handle {
+                                        ResizeHandle::Top => {
+                                            crop_rect.min.y += delta_norm.y;
+                                            new_h -= delta_norm.y;
+                                        }
+                                        ResizeHandle::Bottom => {
+                                            crop_rect.max.y += delta_norm.y;
+                                            new_h += delta_norm.y;
+                                        }
+                                        _ => {}
+                                    }
+
+                                    // Constrain Width
+                                    let new_w = new_h * norm_aspect;
+                                    let old_center_x = crop_rect.center().x;
+                                    crop_rect.min.x = old_center_x - new_w * 0.5;
+                                    crop_rect.max.x = old_center_x + new_w * 0.5;
                                 }
                             }
                         } else {
                             // Free resize
                             match handle {
                                 ResizeHandle::Center => {
-                                    *crop_rect = crop_rect.translate(delta_norm);
+                                    // Safe Panning: constrain delta to stay within bounds
+                                    let mut final_delta = delta_norm;
+                                    if crop_rect.min.x + final_delta.x < 0.0 {
+                                        final_delta.x = -crop_rect.min.x;
+                                    }
+                                    if crop_rect.max.x + final_delta.x > 1.0 {
+                                        final_delta.x = 1.0 - crop_rect.max.x;
+                                    }
+                                    if crop_rect.min.y + final_delta.y < 0.0 {
+                                        final_delta.y = -crop_rect.min.y;
+                                    }
+                                    if crop_rect.max.y + final_delta.y > 1.0 {
+                                        final_delta.y = 1.0 - crop_rect.max.y;
+                                    }
+
+                                    *crop_rect = crop_rect.translate(final_delta);
                                 }
                                 ResizeHandle::TopLeft => {
                                     crop_rect.min += delta_norm;
