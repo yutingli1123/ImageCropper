@@ -23,10 +23,12 @@ enum AspectRatioMode {
     R3_2,
     R4_3,
     R16_9,
+    R16_10,
     // Portrait
     R2_3,
     R3_4,
     R9_16,
+    R10_16,
     Custom,
 }
 
@@ -82,9 +84,11 @@ impl ImageCropper {
                 AspectRatioMode::R3_2 => Some(3.0 / 2.0),
                 AspectRatioMode::R4_3 => Some(4.0 / 3.0),
                 AspectRatioMode::R16_9 => Some(16.0 / 9.0),
+                AspectRatioMode::R16_10 => Some(16.0 / 10.0),
                 AspectRatioMode::R2_3 => Some(2.0 / 3.0),
                 AspectRatioMode::R3_4 => Some(3.0 / 4.0),
                 AspectRatioMode::R9_16 => Some(9.0 / 16.0),
+                AspectRatioMode::R10_16 => Some(10.0 / 16.0),
                 AspectRatioMode::Custom => Some(self.custom_w as f32 / self.custom_h as f32),
             };
 
@@ -252,6 +256,13 @@ impl eframe::App for ImageCropper {
                                     "16:9",
                                 )
                                 .changed();
+                            changed |= ui
+                                .selectable_value(
+                                    &mut self.aspect_ratio_mode,
+                                    AspectRatioMode::R16_10,
+                                    "16:10",
+                                )
+                                .changed();
 
                             ui.separator();
                             ui.label("Portrait");
@@ -274,6 +285,13 @@ impl eframe::App for ImageCropper {
                                     &mut self.aspect_ratio_mode,
                                     AspectRatioMode::R9_16,
                                     "9:16",
+                                )
+                                .changed();
+                            changed |= ui
+                                .selectable_value(
+                                    &mut self.aspect_ratio_mode,
+                                    AspectRatioMode::R10_16,
+                                    "10:16",
                                 )
                                 .changed();
 
@@ -386,9 +404,11 @@ impl eframe::App for ImageCropper {
                             AspectRatioMode::R3_2 => Some(3.0 / 2.0),
                             AspectRatioMode::R4_3 => Some(4.0 / 3.0),
                             AspectRatioMode::R16_9 => Some(16.0 / 9.0),
+                            AspectRatioMode::R16_10 => Some(16.0 / 10.0),
                             AspectRatioMode::R2_3 => Some(2.0 / 3.0),
                             AspectRatioMode::R3_4 => Some(3.0 / 4.0),
                             AspectRatioMode::R9_16 => Some(9.0 / 16.0),
+                            AspectRatioMode::R10_16 => Some(10.0 / 16.0),
                             AspectRatioMode::Custom => {
                                 Some(self.custom_w as f32 / self.custom_h as f32)
                             }
