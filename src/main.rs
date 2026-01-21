@@ -413,15 +413,21 @@ impl eframe::App for ImageCropper {
                 let scale = (max_size.x / image_size.x).min(max_size.y / image_size.y);
                 let display_size = image_size * scale;
 
-                let (response, painter) = ui.allocate_painter(
-                    display_size + egui::vec2(PADDING * 2.0, PADDING * 2.0),
-                    egui::Sense::drag(),
-                );
+                let total_display_size = display_size + egui::vec2(PADDING * 2.0, PADDING * 2.0);
+
+                // Manual centering
+                let x_offset = (available_size.x - total_display_size.x) / 2.0;
+                let y_offset = (available_size.y - total_display_size.y) / 2.0;
+                let start_pos = ui.cursor().min + egui::vec2(x_offset.max(0.0), y_offset.max(0.0));
+
+                let target_rect = egui::Rect::from_min_size(start_pos, total_display_size);
+
+                let response = ui.allocate_rect(target_rect, egui::Sense::drag());
+                let painter = ui.painter_at(target_rect);
 
                 // Center the image rect within the response rect (which includes padding)
-                // Actually simple way: start at min + padding
                 let image_rect = egui::Rect::from_min_size(
-                    response.rect.min + egui::vec2(PADDING, PADDING),
+                    target_rect.min + egui::vec2(PADDING, PADDING),
                     display_size,
                 );
 
@@ -469,67 +475,37 @@ impl eframe::App for ImageCropper {
                             }
                         };
 
-                        if let Some(ratio) = target_ratio {
+                        if let Some(_ratio) = target_ratio {
                             // Constrained resize
-                            let norm_aspect = ratio * (image_size.y / image_size.x);
-
                             match handle {
                                 ResizeHandle::Center => {
                                     *crop_rect = crop_rect.translate(delta_norm);
                                 }
                                 ResizeHandle::TopLeft => {
-                                    let d = delta_norm.x;
-                                    crop_rect.min.x += d;
-                                    crop_rect.min.y += d / norm_aspect;
+                                    crop_rect.min += delta_norm;
                                 }
                                 ResizeHandle::TopRight => {
-                                    let d = delta_norm.x;
-                                    crop_rect.max.x += d;
-                                    crop_rect.min.y -= d / norm_aspect;
+                                    crop_rect.min.y += delta_norm.y;
+                                    crop_rect.max.x += delta_norm.x;
                                 }
                                 ResizeHandle::BottomLeft => {
-                                    let d = delta_norm.x;
-                                    crop_rect.min.x += d;
-                                    crop_rect.max.y -= d / norm_aspect;
+                                    crop_rect.min.x += delta_norm.x;
+                                    crop_rect.max.y += delta_norm.y;
                                 }
                                 ResizeHandle::BottomRight => {
-                                    let d = delta_norm.x;
-                                    crop_rect.max.x += d;
-                                    crop_rect.max.y += d / norm_aspect;
-                                }
-                                // For side handles, we can adjust the other dimension to match
-                                ResizeHandle::Left => {
-                                    crop_rect.min.x += delta_norm.x;
-                                    // Update height to match new width
-                                    let w = crop_rect.width();
-                                    let h = w / norm_aspect;
-                                    let center = crop_rect.center().y;
-                                    crop_rect.min.y = center - h / 2.0;
-                                    crop_rect.max.y = center + h / 2.0;
-                                }
-                                ResizeHandle::Right => {
-                                    crop_rect.max.x += delta_norm.x;
-                                    let w = crop_rect.width();
-                                    let h = w / norm_aspect;
-                                    let center = crop_rect.center().y;
-                                    crop_rect.min.y = center - h / 2.0;
-                                    crop_rect.max.y = center + h / 2.0;
+                                    crop_rect.max += delta_norm;
                                 }
                                 ResizeHandle::Top => {
                                     crop_rect.min.y += delta_norm.y;
-                                    let h = crop_rect.height();
-                                    let w = h * norm_aspect;
-                                    let center = crop_rect.center().x;
-                                    crop_rect.min.x = center - w / 2.0;
-                                    crop_rect.max.x = center + w / 2.0;
                                 }
                                 ResizeHandle::Bottom => {
                                     crop_rect.max.y += delta_norm.y;
-                                    let h = crop_rect.height();
-                                    let w = h * norm_aspect;
-                                    let center = crop_rect.center().x;
-                                    crop_rect.min.x = center - w / 2.0;
-                                    crop_rect.max.x = center + w / 2.0;
+                                }
+                                ResizeHandle::Left => {
+                                    crop_rect.min.x += delta_norm.x;
+                                }
+                                ResizeHandle::Right => {
+                                    crop_rect.max.x += delta_norm.x;
                                 }
                             }
                         } else {
