@@ -572,9 +572,31 @@ impl eframe::App for ImageCropper {
                                     let lambda = p.dot(u) / u.length_sq();
                                     let constrained_screen = u * lambda;
 
-                                    // 4. Convert back to normalized and update rect
-                                    let final_dim =
+                                    // 4. Convert back to normalized
+                                    let mut final_dim =
                                         to_norm(constrained_screen.x, constrained_screen.y);
+
+                                    // 5. Constrain to Image Bounds BEFORE applying
+                                    // Calculate max available dimensions from anchor
+                                    let (max_w, max_h) = match handle {
+                                        ResizeHandle::TopLeft => (anchor.x, anchor.y),
+                                        ResizeHandle::TopRight => (1.0 - anchor.x, anchor.y),
+                                        ResizeHandle::BottomLeft => (anchor.x, 1.0 - anchor.y),
+                                        ResizeHandle::BottomRight => {
+                                            (1.0 - anchor.x, 1.0 - anchor.y)
+                                        }
+                                        _ => (1.0, 1.0),
+                                    };
+
+                                    // Scale down if exceeding bounds
+                                    let mut scale_factor = 1.0f32;
+                                    if final_dim.x > max_w {
+                                        scale_factor = scale_factor.min(max_w / final_dim.x);
+                                    }
+                                    if final_dim.y > max_h {
+                                        scale_factor = scale_factor.min(max_h / final_dim.y);
+                                    }
+                                    final_dim *= scale_factor;
 
                                     // Reconstruct rect from Anchor
                                     let (new_min, new_max) = match handle {
@@ -591,55 +613,126 @@ impl eframe::App for ImageCropper {
                                         _ => (egui::Pos2::ZERO, egui::Pos2::ZERO),
                                     };
 
-                                    // Update crop_rect (handling potential negative flips if crossed)
-                                    // But since we used .abs() and fixed anchors, we assume simple expansion/shrinkage
-                                    // However, simpler to just use from_min_max and let standardization happen later
-                                    // But our logic assumes anchor is fixed OPPOSITE corner.
                                     *crop_rect = egui::Rect::from_min_max(new_min, new_max);
                                 }
 
                                 // Side Handles: Drive one dimension, center the other
                                 ResizeHandle::Left | ResizeHandle::Right => {
                                     // Drive Width
-                                    let mut new_w = crop_rect.width();
                                     match handle {
                                         ResizeHandle::Left => {
                                             crop_rect.min.x += delta_norm.x;
-                                            new_w -= delta_norm.x;
                                         }
                                         ResizeHandle::Right => {
                                             crop_rect.max.x += delta_norm.x;
-                                            new_w += delta_norm.x;
                                         }
                                         _ => {}
                                     }
 
-                                    // Constrain Height
-                                    let new_h = new_w / norm_aspect;
+                                    // Use absolute width (in case of crossover, though UI usually prevents)
+                                    let mut new_w = (crop_rect.max.x - crop_rect.min.x).abs();
+
+                                    // Constrain Width
+                                    // 1. If width > 1.0, clamp to 1.0
+                                    if new_w > 1.0 {
+                                        new_w = 1.0;
+                                    }
+
+                                    // 2. Calc Height
+                                    let mut new_h = new_w / norm_aspect;
+
+                                    // 3. If Height > 1.0, clamp Height => clamp Width
+                                    if new_h > 1.0 {
+                                        new_h = 1.0;
+                                        new_w = new_h * norm_aspect;
+                                    }
+
+                                    // 4. Center Height
                                     let old_center_y = crop_rect.center().y;
-                                    crop_rect.min.y = old_center_y - new_h * 0.5;
-                                    crop_rect.max.y = old_center_y + new_h * 0.5;
+                                    let mut min_y = old_center_y - new_h * 0.5;
+                                    let mut max_y = old_center_y + new_h * 0.5;
+
+                                    // 5. Bounds Check & Slide
+                                    if min_y < 0.0 {
+                                        let offset = -min_y;
+                                        min_y += offset;
+                                        max_y += offset;
+                                    }
+                                    if max_y > 1.0 {
+                                        let offset = 1.0 - max_y;
+                                        min_y += offset;
+                                        max_y += offset;
+                                    }
+
+                                    // Apply
+                                    crop_rect.min.y = min_y;
+                                    crop_rect.max.y = max_y;
+                                    // Re-apply width to handled side (keeping center if possible? No, we moved one side)
+                                    // Actually we just updated crop_rect.min/max.x above directly.
+                                    // We need to re-sync them to the valid new_w
+                                    match handle {
+                                        ResizeHandle::Left => {
+                                            crop_rect.min.x = crop_rect.max.x - new_w
+                                        }
+                                        ResizeHandle::Right => {
+                                            crop_rect.max.x = crop_rect.min.x + new_w
+                                        }
+                                        _ => {}
+                                    }
                                 }
                                 ResizeHandle::Top | ResizeHandle::Bottom => {
                                     // Drive Height
-                                    let mut new_h = crop_rect.height();
                                     match handle {
                                         ResizeHandle::Top => {
                                             crop_rect.min.y += delta_norm.y;
-                                            new_h -= delta_norm.y;
                                         }
                                         ResizeHandle::Bottom => {
                                             crop_rect.max.y += delta_norm.y;
-                                            new_h += delta_norm.y;
                                         }
                                         _ => {}
                                     }
 
-                                    // Constrain Width
-                                    let new_w = new_h * norm_aspect;
+                                    let mut new_h = (crop_rect.max.y - crop_rect.min.y).abs();
+
+                                    // Constrain
+                                    if new_h > 1.0 {
+                                        new_h = 1.0;
+                                    }
+
+                                    let mut new_w = new_h * norm_aspect;
+
+                                    if new_w > 1.0 {
+                                        new_w = 1.0;
+                                        new_h = new_w / norm_aspect;
+                                    }
+
                                     let old_center_x = crop_rect.center().x;
-                                    crop_rect.min.x = old_center_x - new_w * 0.5;
-                                    crop_rect.max.x = old_center_x + new_w * 0.5;
+                                    let mut min_x = old_center_x - new_w * 0.5;
+                                    let mut max_x = old_center_x + new_w * 0.5;
+
+                                    if min_x < 0.0 {
+                                        let offset = -min_x;
+                                        min_x += offset;
+                                        max_x += offset;
+                                    }
+                                    if max_x > 1.0 {
+                                        let offset = 1.0 - max_x;
+                                        min_x += offset;
+                                        max_x += offset;
+                                    }
+
+                                    crop_rect.min.x = min_x;
+                                    crop_rect.max.x = max_x;
+
+                                    match handle {
+                                        ResizeHandle::Top => {
+                                            crop_rect.min.y = crop_rect.max.y - new_h
+                                        }
+                                        ResizeHandle::Bottom => {
+                                            crop_rect.max.y = crop_rect.min.y + new_h
+                                        }
+                                        _ => {}
+                                    }
                                 }
                             }
                         } else {
