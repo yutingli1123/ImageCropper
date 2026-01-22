@@ -370,7 +370,7 @@ impl eframe::App for ImageCropper {
                             .add(
                                 egui::DragValue::new(&mut self.custom_w)
                                     .speed(0.1)
-                                    .range(1..=100),
+                                    .range(1..=10000),
                             )
                             .changed();
                         ui.label(":");
@@ -378,7 +378,7 @@ impl eframe::App for ImageCropper {
                             .add(
                                 egui::DragValue::new(&mut self.custom_h)
                                     .speed(0.1)
-                                    .range(1..=100),
+                                    .range(1..=10000),
                             )
                             .changed();
                     }
